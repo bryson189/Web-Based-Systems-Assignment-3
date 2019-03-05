@@ -2,35 +2,195 @@
 <html>
   <head>
     <title>Socket.IO chat</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font: 13px Helvetica, Arial; }
-      form { background: #000; padding: 3px; position: fixed; bottom: 0; width: 100%; }
-      form input { border: 0; padding: 10px; width: 90%; margin-right: .5%; }
-      form button { width: 9%; background: rgb(130, 224, 255); border: none; padding: 10px; }
-      #messages { list-style-type: none; margin: 0; padding: 0; }
-      #messages li { padding: 5px 10px; }
-      #messages li:nth-child(odd) { background: #eee; }
-    </style>
+    <link rel="stylesheet" type="text/css" href="styles.css" />
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
   </head>
   <body>
-    <ul id="messages"></ul>
-    <form action="">
-      <input id="m" autocomplete="off" /><button>Send</button>
-    </form>
+    <div class="container">
+        <div class="top-container row">
+            <div class="col-9">
+                <p id="username-notif">You are user 1</p>
+                <div class="messages-box">
+                    <ul id="messages"></ul>
+                </div>
+            </div>
+            <div class="col-3">
+                Online users:
+                <div class="users-box">
+                    <ul id="online-users"></ul>
+                </div>
+            </div>
+        </div>
+        <form action="">
+          <input id="m" autocomplete="off" />
+        </form>
+    </div>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
     <script>
+      var userName = "User";
+      var allUsers = [];
+      var userColors = [];
+
       $(function () {
         var socket = io();
+        var createCookie = function(name, value, days) {
+            var expires;
+            if (days) {
+                var date = new Date();
+                date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                expires = "; expires=" + date.toGMTString();
+            }
+            else {
+                expires = "";
+            }
+            document.cookie = name + "=" + value + expires + "; path=/";
+        }
+
+        function getCookie(c_name) {
+            if (document.cookie.length > 0) {
+                c_start = document.cookie.indexOf(c_name + "=");
+                if (c_start != -1) {
+                    c_start = c_start + c_name.length + 1;
+                    c_end = document.cookie.indexOf(";", c_start);
+                    if (c_end == -1) {
+                        c_end = document.cookie.length;
+                    }
+                    return unescape(document.cookie.substring(c_start, c_end));
+                }
+            }
+            return "";
+        }
+        let name = getCookie("name");
+        if (name != "") {
+            userName = name;
+            console.log("cookie found, name: " + userName);
+            socket.emit("old user", [userName, getCookie("color")]);
+        }
+        else {
+            console.log("new user detected");
+            socket.emit("new user");
+        }
         $('form').submit(function(e){
           e.preventDefault(); // prevents page reloading
-          socket.emit('chat message', $('#m').val());
+          if ($('#m').val().startsWith("/nick ")) {
+              let newUsername = $('#m').val().substring(6, $('#m').val().length);
+              if (!allUsers.includes(newUsername))
+              {
+                  let names = [userName, newUsername];
+                  socket.emit('user name change', names);
+                  var index = allUsers.indexOf(userName);
+                  if (index !== -1) allUsers.splice(index, 1);
+                  allUsers.push(newUsername);
+                  userName = newUsername;
+                  createCookie("name", userName, 7);
+                  document.getElementById('username-notif').textContent = "You are " + userName;
+              }
+              else
+              {
+                  alert("Error! This nickname already exists!");
+              }
+          }
+          else if ($('#m').val().startsWith("/nickcolor ")) {
+              let nickColor = $('#m').val().substring(11, $('#m').val().length);
+              if (nickColor.length === 6)
+              {
+                  socket.emit('nick color changed', [userName, "#" + nickColor]);
+                  createCookie("color", '#' + nickColor, 7);
+              }
+              else
+              {
+                  alert("Error! Invalid color was entered!");
+              }
+          }
+          else if ($('#m').val().length > 0) {
+              let date = new Date();
+              let mins = date.getMinutes();
+              let hours = date.getHours();
+              if (mins < 10)
+              {
+                  mins = "0" + mins;
+              }
+              if (hours < 10)
+              {
+                  hours = "0" + hours;
+              }
+              let currTime = hours + ':' + mins;
+              socket.emit('chat message', currTime + " " + userName + ": " + $('#m').val());
+              $(".messages-box").stop().animate({ scrollTop: $(".messages-box")[0].scrollHeight }, 1000);
+          }
           $('#m').val('');
           return false;
         });
-        socket.on('chat message', function(msg){
-          $('#messages').append($('<li>').text(msg));
+
+        socket.on('user name assign', function(name) {
+          if (userName === "User") {
+              userName = userName + name;
+          }
+          createCookie("name", userName, 7);
+          document.getElementById('username-notif').textContent = "You are " + userName;
+          console.log(userName);
+        });
+
+        socket.on('user list', function(userList) {
+          allUsers = userList;
+          $('#online-users').empty();
+          for (i = 0; i < allUsers.length; i++) {
+            let nickName = allUsers[i];
+            let index = allUsers.indexOf(nickName);
+            let ul = document.getElementById("online-users");
+            let li = document.createElement("li");
+            li.style.color = userColors[index];
+            li.appendChild(document.createTextNode(allUsers[i]));
+            ul.appendChild(li);
+          }
+        });
+
+        function addChatRow(msg) {
+            let nickName = msg.substring(6, msg.indexOf(":", 6));
+            let index = allUsers.indexOf(nickName);
+            let ul = document.getElementById("messages");
+            let li = document.createElement("li");
+            li.style.color = userColors[index];
+            if (nickName === userName) {
+                li.style.fontWeight = "bold";
+            }
+            li.appendChild(document.createTextNode(msg));
+            ul.appendChild(li);
+        }
+
+        socket.on('chatLog history', function(log) {
+          $('#messages').empty();
+          for (i = 0; i < log.length; i++) {
+              addChatRow(log[i]);
+          }
+          $(".messages-box").stop().animate({ scrollTop: $(".messages-box")[0].scrollHeight}, 1000);
+        });
+
+        socket.on('chat message', function(msg) {
+          addChatRow(msg);
+          $(".messages-box").stop().animate({ scrollTop: $(".messages-box")[0].scrollHeight }, 1000);
+        });
+
+        socket.on('nick color changed', function(nickColor) {
+          console.log("new nick color: " + nickColor);
+          let index = allUsers.indexOf(nickColor[0]); //Refresh nick name colors
+          userColors[index] = nickColor[1];
+          $('#online-users').empty();
+          for (i = 0; i < allUsers.length; i++) {
+            let nickName = allUsers[i];
+            let index = allUsers.indexOf(nickName);
+            let ul = document.getElementById("online-users");
+            let li = document.createElement("li");
+            li.style.color = userColors[index];
+            li.appendChild(document.createTextNode(allUsers[i]));
+            ul.appendChild(li);
+          }
+        });
+
+        socket.on('all colors', function(colors) {
+          userColors = colors;
         });
       });
     </script>
